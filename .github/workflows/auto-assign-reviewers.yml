@@ -1,0 +1,29 @@
+name: "Auto Assign Reviewers"
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+jobs:
+  assign-reviewers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assign Reviewers
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Define an array of GitHub usernames to assign as reviewers
+            const reviewers = ['rtonsing', 'rbfrank']
+
+            // Only assign reviewers for opened or ready_for_review PRs
+            if (['opened', 'ready_for_review'].includes(context.payload.action)) {
+              await github.rest.pulls.requestReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number,
+                reviewers: reviewers
+              })
+              core.info(`Assigned reviewers: ${reviewers.join(', ')}`)
+            } else {
+              core.info('Action not triggered for this event type.')
+            }
