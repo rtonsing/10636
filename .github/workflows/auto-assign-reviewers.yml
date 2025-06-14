@@ -1,29 +1,119 @@
-name: "Auto Assign Reviewers"
+name: Auto-assign PR Reviewers
 
 on:
   pull_request:
-    types: [opened, ready_for_review]
+    types: [opened, reopened, ready_for_review]
 
 jobs:
   assign-reviewers:
     runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    
     steps:
-      - name: Assign Reviewers
-        uses: actions/github-script@v7
-        with:
-          script: |
-            // Define an array of GitHub usernames to assign as reviewers
-            const reviewers = ['rtonsing', 'rbfrank']
-
-            // Only assign reviewers for opened or ready_for_review PRs
-            if (['opened', 'ready_for_review'].includes(context.payload.action)) {
+    - name: Assign reviewers
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { owner, repo, number } = context.repo;
+          const prNumber = context.payload.pull_request.number;
+          const prAuthor = context.payload.pull_request.user.login;
+          
+          // Define your team members and reviewers
+          const reviewers = [
+            'rtonsing',
+            'rbfrank' 
+          ];
+          
+          // Define team reviewers (GitHub teams)
+          const teamReviewers = [
+            'frontend-team',
+            'backend-team'
+          ];
+          
+          // Filter out the PR author from reviewers
+          const availableReviewers = reviewers.filter(reviewer => reviewer !== prAuthor);
+          
+          // Assign reviewers based on file changes (optional)
+          const { data: files } = await github.rest.pulls.listFiles({
+            owner,
+            repo,
+            pull_number: prNumber
+          });
+          
+          let selectedReviewers = [];
+          let selectedTeamReviewers = [];
+          
+          // Example: Assign based on file patterns
+          const hasBackendChanges = files.some(file => 
+            file.filename.includes('src/') || 
+            file.filename.includes('api/') ||
+            file.filename.endsWith('.py') ||
+            file.filename.endsWith('.js')
+          );
+          
+          const hasFrontendChanges = files.some(file =>
+            file.filename.includes('components/') ||
+            file.filename.includes('pages/') ||
+            file.filename.endsWith('.tsx') ||
+            file.filename.endsWith('.css')
+          );
+          
+          const hasConfigChanges = files.some(file =>
+            file.filename.includes('config/') ||
+            file.filename.includes('.yml') ||
+            file.filename.includes('.yaml') ||
+            file.filename.includes('Dockerfile')
+          );
+          
+          // Assign reviewers based on changes
+          if (hasBackendChanges) {
+            selectedReviewers.push('reviewer1', 'reviewer2');
+            selectedTeamReviewers.push('backend-team');
+          }
+          
+          if (hasFrontendChanges) {
+            selectedReviewers.push('reviewer2', 'reviewer3');
+            selectedTeamReviewers.push('frontend-team');
+          }
+          
+          if (hasConfigChanges) {
+            selectedReviewers.push('team-lead');
+          }
+          
+          // If no specific patterns matched, assign default reviewers
+          if (selectedReviewers.length === 0) {
+            selectedReviewers = availableReviewers.slice(0, 2); // Assign first 2 available reviewers
+          }
+          
+          // Remove duplicates and filter out PR author
+          selectedReviewers = [...new Set(selectedReviewers)].filter(reviewer => reviewer !== prAuthor);
+          selectedTeamReviewers = [...new Set(selectedTeamReviewers)];
+          
+          // Limit to maximum of 3 individual reviewers
+          selectedReviewers = selectedReviewers.slice(0, 3);
+          
+          try {
+            if (selectedReviewers.length > 0 || selectedTeamReviewers.length > 0) {
               await github.rest.pulls.requestReviewers({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: context.payload.pull_request.number,
-                reviewers: reviewers
-              })
-              core.info(`Assigned reviewers: ${reviewers.join(', ')}`)
-            } else {
-              core.info('Action not triggered for this event type.')
+                owner,
+                repo,
+                pull_number: prNumber,
+                reviewers: selectedReviewers // ,
+                // team_reviewers: selectedTeamReviewers
+              });
+              
+              console.log(`Assigned reviewers: ${selectedReviewers.join(', ')}`);
+              console.log(`Assigned team reviewers: ${selectedTeamReviewers.join(', ')}`);
+              
+              // Optional: Add a comment to the PR
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body: `🤖 Auto-assigned reviewers based on file changes:\n- Individual reviewers: ${selectedReviewers.join(', ')}\n- Team reviewers: ${selectedTeamReviewers.join(', ')}`
+              });
             }
+          } catch (error) {
+            console.error('Error assigning reviewers:', error);
+            core.setFailed(`Failed to assign reviewers: ${error.message}`);
+          }
